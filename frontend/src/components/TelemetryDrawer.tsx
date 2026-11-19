@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Activity, ChevronDown, ChevronUp, Clock, ShieldCheck, Zap } from "lucide-react";
+import { Activity, ChevronDown, ChevronUp } from "lucide-react";
 import { TelemetryData } from "../lib/types";
 
 interface TelemetryDrawerProps {

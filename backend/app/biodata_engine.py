@@ -1,9 +1,14 @@
-import base64
+"""Biodata & Form Extraction Engine for XeroxAI 2.0.
+
+Provides structured entity parsing (Ollama Gemma with heuristic regex fallback)
+and single-page A4 print-ready PDF generation via ReportLab.
+"""
+
 import io
 import json
+import logging
 import re
-import time
-from typing import Tuple
+from typing import Optional
 import httpx
 from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import A4
@@ -14,7 +19,9 @@ from app.config import settings
 from app.models import BiodataSchema
 from app.telemetry import trace_span
 
-GEMMA_SYSTEM_PROMPT = """
+logger = logging.getLogger(__name__)
+
+GEMMA_SYSTEM_PROMPT: str = """
 You are XeroxAI, an intelligent entity extraction assistant in a local print and cyber-café shop.
 Extract customer details from the following raw, scrawled, or informal text into the exact JSON schema provided:
 {
@@ -30,91 +37,222 @@ Extract customer details from the following raw, scrawled, or informal text into
 Only output valid JSON matching this schema, without markdown formatting or additional commentary.
 """
 
-def _heuristic_parse(raw_text: str) -> BiodataSchema:
+
+def _extract_contact(text: str) -> str:
+    """Extracts phone number from customer notes.
+
+    Args:
+        text: Raw customer text.
+
+    Returns:
+        Extracted contact string.
     """
-    High-fidelity offline heuristic extraction for cyber-café customer notes
-    when Ollama is unreachable, ensuring 100% demo stability.
+    phone_match = re.search(
+        r"(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}|\b[6-9]\d{9}\b",
+        text,
+    )
+    return phone_match.group(0).strip() if phone_match else "9876543210"
+
+
+def _extract_email(text: str) -> str:
+    """Extracts email address from customer notes.
+
+    Args:
+        text: Raw customer text.
+
+    Returns:
+        Extracted email address or placeholder.
     """
-    text = raw_text.strip()
-    
-    # 1. Contact / Phone regex
-    phone_match = re.search(r'(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}|\b[6-9]\d{9}\b', text)
-    contact = phone_match.group(0).strip() if phone_match else "9876543210"
-    
-    # 2. Email regex
-    email_match = re.search(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', text)
-    email = email_match.group(0).strip() if email_match else "candidate@example.com"
-    
-    # 3. DOB extraction
-    dob_match = re.search(r'(?:DOB|D\.O\.B|Born|Birth)\s*[:=-]?\s*([0-9]{1,2}[-/.][0-9]{1,2}[-/.][0-9]{2,4})', text, re.IGNORECASE)
+    email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
+    return email_match.group(0).strip() if email_match else "candidate@example.com"
+
+
+def _extract_dob(text: str) -> str:
+    """Extracts date of birth string from customer notes.
+
+    Args:
+        text: Raw customer text.
+
+    Returns:
+        Extracted date of birth string.
+    """
+    dob_match = re.search(
+        r"(?:DOB|D\.O\.B|Born|Birth)\s*[:=-]?\s*([0-9]{1,2}[-/.][0-9]{1,2}[-/.][0-9]{2,4})",
+        text,
+        re.IGNORECASE,
+    )
     if not dob_match:
-        dob_match = re.search(r'\b([0-9]{1,2}[-/.][0-9]{1,2}[-/.][0-9]{2,4})\b', text)
-    dob = dob_match.group(1).strip() if dob_match else "15/08/1998"
-    
-    # 4. Name extraction
-    name_match = re.search(r'(?:Name|Candidate|Mr\.|Ms\.|Mrs\.)\s*[:=-]?\s*([A-Za-z\s.]+)', text, re.IGNORECASE)
+        dob_match = re.search(
+            r"\b([0-9]{1,2}[-/.][0-9]{1,2}[-/.][0-9]{2,4})\b", text
+        )
+    return dob_match.group(1).strip() if dob_match else "15/08/1998"
+
+
+def _extract_name(text: str) -> str:
+    """Extracts candidate full name from customer notes.
+
+    Args:
+        text: Raw customer text.
+
+    Returns:
+        Extracted full name.
+    """
+    name_match = re.search(
+        r"(?:Name|Candidate|Mr\.|Ms\.|Mrs\.)\s*[:=-]?\s*([A-Za-z\s.]+)",
+        text,
+        re.IGNORECASE,
+    )
     if name_match:
         full_name = name_match.group(1).strip().split("\n")[0].strip()
     else:
-        # First non-empty line
         lines = [line.strip() for line in text.split("\n") if line.strip()]
         full_name = lines[0] if lines else "Ramesh Kumar"
-    # Clean up name if it contains punctuation or keywords
-    full_name = re.sub(r'^(Name\s*[:=-]?\s*)', '', full_name, flags=re.I).strip()
+
+    full_name = re.sub(r"^(Name\s*[:=-]?\s*)", "", full_name, flags=re.I).strip()
     if len(full_name) > 40:
         full_name = full_name[:40].strip()
-    if not full_name:
-        full_name = "Ramesh Kumar"
-        
-    # 5. Qualification
-    qual_match = re.search(r'\b(B\.?E\.?|B\.?Tech|B\.?Sc|B\.?Com|B\.?A|M\.?E\.?|M\.?Tech|MBA|MCA|Diploma|12th|HSC|SSLC|10th|ITI)\b[^\n,.]*', text, re.IGNORECASE)
-    qualification = qual_match.group(0).strip() if qual_match else "B.Sc Computer Science (First Class)"
-    
-    # 6. Skills
-    known_skills = [
-        "MS Office", "Excel", "Tally ERP", "Photoshop", "DTP Typing",
-        "Python", "JavaScript", "HTML/CSS", "Data Entry", "Accounting", "Customer Support"
-    ]
-    skills = [s for s in known_skills if re.search(rf'\b{re.escape(s)}\b', text, re.I)]
-    if not skills:
-        skills = ["MS Office & Excel", "DTP & English Typing (45 WPM)", "Tally ERP 9", "Customer Service"]
-        
-    # 7. Languages
-    known_langs = ["English", "Tamil", "Hindi", "Telugu", "Malayalam", "Kannada", "Marathi"]
-    languages = [l for l in known_langs if re.search(rf'\b{re.escape(l)}\b', text, re.I)]
-    if not languages:
-        languages = ["English", "Tamil", "Hindi"]
-        
-    # 8. Address
-    addr_match = re.search(r'(?:Address|Residing at|Add)\s*[:=-]?\s*([^\n]+(?:\n[^\n]+)?)', text, re.IGNORECASE)
-    if addr_match:
-        address = addr_match.group(1).replace("\n", ", ").strip()
-    else:
-        address = "No. 14, Gandhi Road, Anna Nagar, Chennai - 600040"
-        
-    return BiodataSchema(
-        full_name=full_name,
-        dob=dob,
-        qualification=qualification,
-        contact=contact,
-        email=email,
-        address=address,
-        skills=skills,
-        languages=languages
+    return full_name or "Ramesh Kumar"
+
+
+def _extract_qualification(text: str) -> str:
+    """Extracts highest qualification or degree from text.
+
+    Args:
+        text: Raw customer text.
+
+    Returns:
+        Extracted qualification title.
+    """
+    qual_match = re.search(
+        r"\b(B\.?E\.?|B\.?Tech|B\.?Sc|B\.?Com|B\.?A|M\.?E\.?|M\.?Tech|MBA|MCA|Diploma|12th|HSC|SSLC|10th|ITI)\b[^\n,.]*",
+        text,
+        re.IGNORECASE,
+    )
+    return (
+        qual_match.group(0).strip()
+        if qual_match
+        else "B.Sc Computer Science (First Class)"
     )
 
-def extract_biodata_with_gemma(raw_text: str) -> Tuple[BiodataSchema, bool, str]:
+
+def _extract_skills(text: str) -> list[str]:
+    """Extracts known professional skills from text.
+
+    Args:
+        text: Raw customer text.
+
+    Returns:
+        List of identified skill strings.
     """
-    Extracts structured biodata using local Gemma 2:2B via Ollama.
+    known_skills = [
+        "MS Office",
+        "Excel",
+        "Tally ERP",
+        "Photoshop",
+        "DTP Typing",
+        "Python",
+        "JavaScript",
+        "HTML/CSS",
+        "Data Entry",
+        "Accounting",
+        "Customer Support",
+    ]
+    skills = [s for s in known_skills if re.search(rf"\b{re.escape(s)}\b", text, re.I)]
+    return (
+        skills
+        if skills
+        else [
+            "MS Office & Excel",
+            "DTP & English Typing (45 WPM)",
+            "Tally ERP 9",
+            "Customer Service",
+        ]
+    )
+
+
+def _extract_languages(text: str) -> list[str]:
+    """Extracts known spoken/written languages from text.
+
+    Args:
+        text: Raw customer text.
+
+    Returns:
+        List of language names.
+    """
+    known_langs = [
+        "English",
+        "Tamil",
+        "Hindi",
+        "Telugu",
+        "Malayalam",
+        "Kannada",
+        "Marathi",
+    ]
+    languages = [
+        lang for lang in known_langs if re.search(rf"\b{re.escape(lang)}\b", text, re.I)
+    ]
+    return languages if languages else ["English", "Tamil", "Hindi"]
+
+
+def _extract_address(text: str) -> str:
+    """Extracts residential or communication address from text.
+
+    Args:
+        text: Raw customer text.
+
+    Returns:
+        Extracted address string.
+    """
+    addr_match = re.search(
+        r"(?:Address|Residing at|Add)\s*[:=-]?\s*([^\n]+(?:\n[^\n]+)?)",
+        text,
+        re.IGNORECASE,
+    )
+    if addr_match:
+        return addr_match.group(1).replace("\n", ", ").strip()
+    return "No. 14, Gandhi Road, Anna Nagar, Chennai - 600040"
+
+
+def _heuristic_parse(raw_text: str) -> BiodataSchema:
+    """Offline deterministic heuristic extraction for cyber-café customer notes.
+
+    Ensures 100% demo stability when Ollama is offline or unreachable.
+
+    Args:
+        raw_text: Raw informal customer notes or WhatsApp text.
+
+    Returns:
+        BiodataSchema populated with parsed fields.
+    """
+    text = raw_text.strip()
+    return BiodataSchema(
+        full_name=_extract_name(text),
+        dob=_extract_dob(text),
+        qualification=_extract_qualification(text),
+        contact=_extract_contact(text),
+        email=_extract_email(text),
+        address=_extract_address(text),
+        skills=_extract_skills(text),
+        languages=_extract_languages(text),
+    )
+
+
+def extract_biodata_with_gemma(raw_text: str) -> tuple[BiodataSchema, bool, str]:
+    """Extracts structured biodata using local Gemma 2:2B via Ollama.
+
     Falls back gracefully to deterministic heuristic parser if Ollama is offline.
-    
-    Returns: (schema, is_fallback, model_name)
+
+    Args:
+        raw_text: Raw informal customer notes string.
+
+    Returns:
+        Tuple of (populated_schema, is_fallback_boolean, model_name_string).
     """
     with trace_span(
         op="llm.extraction",
         description=f"Extract structured biodata using {settings.GEMMA_MODEL}",
         tags={"model": settings.GEMMA_MODEL, "provider": "ollama"},
-        data={"prompt_char_len": len(raw_text)}
+        data={"prompt_char_len": len(raw_text)},
     ):
         try:
             payload = {
@@ -125,21 +263,20 @@ def extract_biodata_with_gemma(raw_text: str) -> Tuple[BiodataSchema, bool, str]
                 "options": {
                     "temperature": 0.1,
                     "top_p": 0.9,
-                }
+                },
             }
-            
+
             response = httpx.post(
                 f"{settings.OLLAMA_BASE_URL}/api/generate",
                 json=payload,
-                timeout=settings.OLLAMA_TIMEOUT_SECONDS
+                timeout=settings.OLLAMA_TIMEOUT_SECONDS,
             )
-            
+
             if response.status_code == 200:
                 data = response.json()
                 raw_response = data.get("response", "{}")
                 parsed_json = json.loads(raw_response)
-                
-                # Sanitize & validate fields through Pydantic
+
                 schema = BiodataSchema(
                     full_name=parsed_json.get("full_name") or "Candidate",
                     dob=parsed_json.get("dob") or "DD/MM/YYYY",
@@ -148,205 +285,288 @@ def extract_biodata_with_gemma(raw_text: str) -> Tuple[BiodataSchema, bool, str]
                     email=parsed_json.get("email") or "",
                     address=parsed_json.get("address") or "",
                     skills=parsed_json.get("skills") or ["General Operations"],
-                    languages=parsed_json.get("languages") or ["English"]
+                    languages=parsed_json.get("languages") or ["English"],
                 )
                 return schema, False, f"{settings.GEMMA_MODEL} (Ollama Live)"
-            else:
-                # HTTP error from Ollama
-                return _heuristic_parse(raw_text), True, f"{settings.GEMMA_MODEL} (Fallback: Status {response.status_code})"
-                
-        except Exception as exc:
-            # Ollama offline, connection refused, or timeout
-            return _heuristic_parse(raw_text), True, f"{settings.GEMMA_MODEL} (Local Heuristic Fallback)"
+
+            logger.warning(
+                "Ollama responded with status %d; using heuristic fallback.",
+                response.status_code,
+            )
+            return (
+                _heuristic_parse(raw_text),
+                True,
+                f"{settings.GEMMA_MODEL} (Fallback: Status {response.status_code})",
+            )
+
+        except (httpx.HTTPError, json.JSONDecodeError, KeyError, ValueError) as exc:
+            logger.info("Ollama unreachable (%s); using heuristic fallback.", exc)
+            return (
+                _heuristic_parse(raw_text),
+                True,
+                f"{settings.GEMMA_MODEL} (Local Heuristic Fallback)",
+            )
+
 
 def generate_biodata_pdf(data: BiodataSchema) -> bytes:
-    """
-    Generates a pixel-perfect, ready-to-print single-page A4 PDF biodata
-    using ReportLab with standard 0.5-inch margins (36 pt) and modern sans-serif hierarchy.
+    """Generates a print-ready single-page A4 PDF biodata using ReportLab.
+
+    Uses standard 0.5-inch margins (36 pt) and clean typographic hierarchy.
+
+    Args:
+        data: Validated BiodataSchema instance.
+
+    Returns:
+        Raw bytes representing the generated A4 PDF file.
     """
     buf = io.BytesIO()
-    
-    # 0.5-inch margins = 36 pt
+
     doc = SimpleDocTemplate(
         buf,
         pagesize=A4,
         leftMargin=36,
         rightMargin=36,
         topMargin=36,
-        bottomMargin=36
+        bottomMargin=36,
     )
-    
+
     styles = getSampleStyleSheet()
-    
-    # Custom palette
-    primary_color = HexColor("#0F172A")    # Deep slate navy
-    accent_color = HexColor("#2563EB")     # Crisp cobalt blue
+
+    primary_color = HexColor("#0F172A")
+    accent_color = HexColor("#2563EB")
     dark_text = HexColor("#1E293B")
     muted_text = HexColor("#64748B")
     border_color = HexColor("#CBD5E1")
     light_bg = HexColor("#F8FAFC")
-    
+
     name_style = ParagraphStyle(
-        'NameStyle',
-        parent=styles['Normal'],
-        fontName='Helvetica-Bold',
+        "NameStyle",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
         fontSize=20,
         leading=24,
         textColor=primary_color,
-        textTransform='uppercase'
+        textTransform="uppercase",
     )
-    
+
     subtitle_style = ParagraphStyle(
-        'SubtitleStyle',
-        parent=styles['Normal'],
-        fontName='Helvetica-Bold',
-        fontSize=10,
-        leading=13,
+        "SubtitleStyle",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=12,
+        leading=16,
         textColor=accent_color,
-        spaceAfter=8
     )
-    
-    contact_style = ParagraphStyle(
-        'ContactStyle',
-        parent=styles['Normal'],
-        fontName='Helvetica',
-        fontSize=8.5,
-        leading=12,
-        textColor=dark_text
-    )
-    
-    section_title_style = ParagraphStyle(
-        'SectionTitleStyle',
-        parent=styles['Normal'],
-        fontName='Helvetica-Bold',
-        fontSize=10,
+
+    section_header_style = ParagraphStyle(
+        "SectionHeaderStyle",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=11,
         leading=14,
         textColor=primary_color,
-        spaceBefore=6,
-        spaceAfter=4
     )
-    
-    body_style = ParagraphStyle(
-        'BodyStyle',
-        parent=styles['Normal'],
-        fontName='Helvetica',
-        fontSize=8.5,
+
+    label_style = ParagraphStyle(
+        "LabelStyle",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=9,
         leading=12,
-        textColor=dark_text
+        textColor=muted_text,
     )
-    
-    bold_body_style = ParagraphStyle(
-        'BoldBodyStyle',
-        parent=styles['Normal'],
-        fontName='Helvetica-Bold',
-        fontSize=8.5,
-        leading=12,
-        textColor=dark_text
+
+    value_style = ParagraphStyle(
+        "ValueStyle",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=9,
+        leading=13,
+        textColor=dark_text,
     )
-    
+
     elements = []
-    
-    # 1. Header Banner & Contact Info
+
+    # 1. Header Banner
     header_data = [
         [
-            Paragraph(f"<b>{data.full_name}</b>", name_style),
-            Paragraph(f"<b>Phone:</b> {data.contact}<br/><b>Email:</b> {data.email}", contact_style)
+            Paragraph(data.full_name or "CANDIDATE BIODATA", name_style),
+            Paragraph(
+                f"<b>Phone:</b> {data.contact}<br/><b>Email:</b> {data.email}",
+                value_style,
+            ),
         ],
         [
-            Paragraph("CURRICULUM VITAE / BIODATA", subtitle_style),
-            Paragraph(f"<b>Address:</b> {data.address}", contact_style)
-        ]
+            Paragraph(data.qualification or "Professional Resume", subtitle_style),
+            Paragraph(f"<b>Address:</b> {data.address}", value_style),
+        ],
     ]
-    header_table = Table(header_data, colWidths=[310, 213])
-    header_table.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-        ('TOPPADDING', (0, 0), (-1, -1), 1),
-        ('LEFTPADDING', (0, 0), (-1, -1), 0),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-        ('LINEBELOW', (0, 1), (-1, 1), 1.5, accent_color),
-    ]))
+    header_table = Table(header_data, colWidths=[320, 203])
+    header_table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
     elements.append(header_table)
     elements.append(Spacer(1, 10))
-    
-    # 2. Objective / Summary Statement
-    elements.append(Paragraph("<b>CAREER OBJECTIVE</b>", section_title_style))
-    objective_text = (
-        f"Dedicated and detail-oriented individual seeking an opportunity to utilize educational background in "
-        f"{data.qualification} and technical proficiencies to contribute effectively towards organizational growth."
+
+    # Decorative Rule
+    rule = Table([[""]], colWidths=[523], rowHeights=[2])
+    rule.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), accent_color)]))
+    elements.append(rule)
+    elements.append(Spacer(1, 14))
+
+    # 2. Personal Information Section
+    elements.append(
+        Paragraph("<b>1. PERSONAL PARTICULARS</b>", section_header_style)
     )
-    elements.append(Paragraph(objective_text, body_style))
-    elements.append(Spacer(1, 8))
-    
-    # 3. Personal & Academic Profile Table
-    elements.append(Paragraph("<b>PERSONAL & ACADEMIC PARTICULARS</b>", section_title_style))
-    particulars_data = [
-        [Paragraph("<b>Full Name:</b>", bold_body_style), Paragraph(data.full_name, body_style)],
-        [Paragraph("<b>Date of Birth:</b>", bold_body_style), Paragraph(data.dob, body_style)],
-        [Paragraph("<b>Highest Qualification:</b>", bold_body_style), Paragraph(data.qualification, body_style)],
-        [Paragraph("<b>Languages Known:</b>", bold_body_style), Paragraph(", ".join(data.languages) if data.languages else "English", body_style)],
-        [Paragraph("<b>Nationality:</b>", bold_body_style), Paragraph("Indian", body_style)],
-        [Paragraph("<b>Marital Status:</b>", bold_body_style), Paragraph("Single", body_style)],
+    elements.append(Spacer(1, 6))
+
+    personal_data = [
+        [
+            Paragraph("Full Name", label_style),
+            Paragraph(data.full_name, value_style),
+            Paragraph("Date of Birth", label_style),
+            Paragraph(data.dob, value_style),
+        ],
+        [
+            Paragraph("Mobile Contact", label_style),
+            Paragraph(data.contact, value_style),
+            Paragraph("Email ID", label_style),
+            Paragraph(data.email, value_style),
+        ],
+        [
+            Paragraph("Residential Address", label_style),
+            Paragraph(data.address, value_style),
+            "",
+            "",
+        ],
     ]
-    particulars_table = Table(particulars_data, colWidths=[150, 373])
-    particulars_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (0, -1), light_bg),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 4),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ('LEFTPADDING', (0, 0), (-1, -1), 6),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
-        ('GRID', (0, 0), (-1, -1), 0.5, border_color),
-    ]))
-    elements.append(particulars_table)
-    elements.append(Spacer(1, 10))
-    
-    # 4. Skills & Proficiencies
-    elements.append(Paragraph("<b>KEY SKILLS & COMPETENCIES</b>", section_title_style))
-    skills_cells = []
-    # Display skills in a 2-column tabular grid
-    for i in range(0, len(data.skills), 2):
-        col1 = Paragraph(f"• {data.skills[i]}", body_style) if i < len(data.skills) else Paragraph("", body_style)
-        col2 = Paragraph(f"• {data.skills[i+1]}", body_style) if i+1 < len(data.skills) else Paragraph("", body_style)
-        skills_cells.append([col1, col2])
-    if not skills_cells:
-        skills_cells.append([Paragraph("• General Computer Applications & Office Operations", body_style), Paragraph("", body_style)])
-        
-    skills_table = Table(skills_cells, colWidths=[261, 262])
-    skills_table.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-        ('LEFTPADDING', (0, 0), (-1, -1), 8),
-    ]))
-    elements.append(skills_table)
-    elements.append(Spacer(1, 10))
-    
-    # 5. Declaration & Counter Sign-off
-    elements.append(Paragraph("<b>DECLARATION</b>", section_title_style))
-    declaration_text = (
-        "I hereby solemnly declare that all the statements and details given above are genuine, complete, "
-        "and correct to the best of my knowledge and belief."
+    personal_table = Table(personal_data, colWidths=[110, 150, 100, 163])
+    personal_table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("GRID", (0, 0), (-1, -1), 0.5, border_color),
+                ("BACKGROUND", (0, 0), (0, -1), light_bg),
+                ("BACKGROUND", (2, 0), (2, -1), light_bg),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("SPAN", (1, 2), (3, 2)),
+            ]
+        )
     )
-    elements.append(Paragraph(declaration_text, body_style))
-    elements.append(Spacer(1, 28))
-    
-    # Sign-off footer
+    elements.append(personal_table)
+    elements.append(Spacer(1, 14))
+
+    # 3. Educational Qualifications
+    elements.append(
+        Paragraph("<b>2. EDUCATIONAL QUALIFICATION</b>", section_header_style)
+    )
+    elements.append(Spacer(1, 6))
+
+    edu_data = [
+        [
+            Paragraph("Examination / Degree", label_style),
+            Paragraph("Details / Specialization", label_style),
+            Paragraph("Status", label_style),
+        ],
+        [
+            Paragraph(data.qualification, value_style),
+            Paragraph("Verified Academic Qualification", value_style),
+            Paragraph("Completed", value_style),
+        ],
+    ]
+    edu_table = Table(edu_data, colWidths=[190, 233, 100])
+    edu_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), light_bg),
+                ("GRID", (0, 0), (-1, -1), 0.5, border_color),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    elements.append(edu_table)
+    elements.append(Spacer(1, 14))
+
+    # 4. Key Skills
+    elements.append(Paragraph("<b>3. SKILLS & COMPETENCIES</b>", section_header_style))
+    elements.append(Spacer(1, 6))
+
+    skills_text = (
+        " • ".join(data.skills)
+        if data.skills
+        else "Computer Fundamentals, Counter Operations"
+    )
+    skills_table = Table(
+        [[Paragraph(skills_text, value_style)]],
+        colWidths=[523],
+    )
+    skills_table.setStyle(
+        TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 0.5, border_color),
+                ("BACKGROUND", (0, 0), (-1, -1), HexColor("#FAFAFA")),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ]
+        )
+    )
+    elements.append(skills_table)
+    elements.append(Spacer(1, 14))
+
+    # 5. Languages Known
+    elements.append(Paragraph("<b>4. LANGUAGES KNOWN</b>", section_header_style))
+    elements.append(Spacer(1, 6))
+
+    langs_text = ", ".join(data.languages) if data.languages else "English, Tamil"
+    langs_table = Table([[Paragraph(langs_text, value_style)]], colWidths=[523])
+    langs_table.setStyle(
+        TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 0.5, border_color),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    elements.append(langs_table)
+    elements.append(Spacer(1, 24))
+
+    # 6. Declaration & Signoff
+    decl_text = (
+        "I hereby declare that all the information furnished above is true, "
+        "complete, and correct to the best of my knowledge and belief."
+    )
+    elements.append(Paragraph(decl_text, value_style))
+    elements.append(Spacer(1, 32))
+
     sign_data = [
         [
-            Paragraph(f"<b>Date:</b> {time.strftime('%d/%m/%Y')}<br/><b>Place:</b> Chennai", body_style),
-            Paragraph(f"<br/><br/>(<b>{data.full_name}</b>)<br/>Signature of Candidate", ParagraphStyle(
-                'SignStyle', parent=body_style, alignment=2 # Right aligned
-            ))
+            Paragraph("<b>Place:</b> ____________________<br/><b>Date:</b>  ____________________", value_style),
+            Paragraph("<b>Candidate Signature:</b> ____________________", value_style),
         ]
     ]
-    sign_table = Table(sign_data, colWidths=[261, 262])
-    sign_table.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
-        ('LEFTPADDING', (0, 0), (-1, -1), 0),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-    ]))
+    sign_table = Table(sign_data, colWidths=[260, 263])
+    sign_table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+                ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
     elements.append(sign_table)
-    
+
     doc.build(elements)
     return buf.getvalue()

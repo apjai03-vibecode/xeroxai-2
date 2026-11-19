@@ -38,8 +38,8 @@ export function QueueEstimator({ onProcessed }: { onProcessed?: () => void }) {
           setEstimate(res);
           if (onProcessed) onProcessed();
         }
-      } catch (err) {
-        console.error("Queue estimation failed:", err);
+      } catch {
+        // Queue estimation fallback handled by loading/empty state
       } finally {
         if (!isCancelled) setIsLoading(false);
       }

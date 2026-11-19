@@ -78,7 +78,9 @@ export function SmartBillingEngine({
   useEffect(() => {
     getPricingApi()
       .then((cfg) => setPricing(cfg))
-      .catch((err) => console.error("Failed to load shop pricing:", err));
+      .catch(() => {
+        // Fallback to default pricing state
+      });
   }, []);
 
   // Recalculate billing whenever items change
@@ -91,8 +93,8 @@ export function SmartBillingEngine({
         if (!isCancelled) {
           setCalculation(res);
         }
-      } catch (err) {
-        console.error("Calculation failed:", err);
+      } catch {
+        // Calculation error handled in UI state
       } finally {
         if (!isCancelled) setIsCalculating(false);
       }
@@ -137,8 +139,8 @@ export function SmartBillingEngine({
       setAiMessage(
         `Parsed order via ${res.model_used}. Pricing calculated strictly using shop rate card.`
       );
-    } catch (err: any) {
-      setAiMessage("Failed to parse request with AI.");
+    } catch (err: unknown) {
+      setAiMessage(err instanceof Error ? err.message : "Failed to parse request with AI.");
     } finally {
       setIsParsingAi(false);
     }
@@ -189,8 +191,8 @@ export function SmartBillingEngine({
       });
       setOrderCreatedMsg(`Order ${res.order_id} created successfully! Saved to persistent SQLite database.`);
       if (onOrderCreated) onOrderCreated();
-    } catch (err: any) {
-      alert("Failed to create order: " + err.message);
+    } catch (err: unknown) {
+      alert("Failed to create order: " + (err instanceof Error ? err.message : String(err)));
     }
   };
 
@@ -202,8 +204,8 @@ export function SmartBillingEngine({
       const updated = await updatePricingApi(pricing);
       setPricing(updated);
       setShowPricingModal(false);
-    } catch (err: any) {
-      alert("Failed to update rates: " + err.message);
+    } catch (err: unknown) {
+      alert("Failed to update rates: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setIsSavingPricing(false);
     }

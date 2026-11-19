@@ -73,8 +73,8 @@ export function PhotoSpecEngine({ onProcessed }: { onProcessed?: () => void }) {
       setProcessedSizeKb(res.sizeKb);
       setProcessedDims(res.dimensions);
       if (onProcessed) onProcessed();
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to process photo.");
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to process photo.");
     } finally {
       setIsProcessing(false);
     }

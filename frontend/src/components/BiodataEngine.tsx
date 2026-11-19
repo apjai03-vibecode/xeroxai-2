@@ -65,14 +65,14 @@ export function BiodataEngine({ onProcessed }: { onProcessed?: () => void }) {
         setPdfBase64(res.pdf_base64);
       }
       if (onProcessed) onProcessed();
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to extract biodata.");
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to extract biodata.");
     } finally {
       setIsExtracting(false);
     }
   };
 
-  const handleFieldChange = (field: keyof BiodataSchema, value: any) => {
+  const handleFieldChange = (field: keyof BiodataSchema, value: string | string[]) => {
     if (!extractedData) return;
     setExtractedData({
       ...extractedData,
@@ -93,7 +93,7 @@ export function BiodataEngine({ onProcessed }: { onProcessed?: () => void }) {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch (err: any) {
+    } catch {
       setErrorMsg("Failed to download PDF.");
     } finally {
       setIsDownloadingPdf(false);

@@ -58,8 +58,8 @@ export function SmartDocEngine({ onProcessed }: { onProcessed?: () => void }) {
       const res = await enhanceDocumentApi(file, mode, deskew, perspective, shadows);
       setResult(res);
       if (onProcessed) onProcessed();
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to process document.");
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to process document.");
     } finally {
       setIsProcessing(false);
     }

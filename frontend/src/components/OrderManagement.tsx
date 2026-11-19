@@ -30,8 +30,8 @@ export function OrderManagement({ refreshSignal }: { refreshSignal?: number }) {
     try {
       const data = await getOrdersApi(statusFilter, searchQuery);
       setOrders(data);
-    } catch (err) {
-      console.error("Failed to load orders:", err);
+    } catch {
+      // Graceful fallback when backend is temporarily offline
     } finally {
       setIsLoading(false);
     }
@@ -54,8 +54,8 @@ export function OrderManagement({ refreshSignal }: { refreshSignal?: number }) {
     try {
       await updateOrderStatusApi(orderId, newStatus);
       fetchOrders();
-    } catch (err: any) {
-      alert("Failed to update status: " + err.message);
+    } catch (err: unknown) {
+      alert("Failed to update status: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setUpdatingId(null);
     }

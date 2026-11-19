@@ -1,6 +1,5 @@
 import {
   BillingCalculationResponse,
-  BiodataRequest,
   BiodataResponse,
   BiodataSchema,
   Order,
