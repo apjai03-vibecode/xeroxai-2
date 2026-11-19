@@ -1,71 +1,61 @@
-# 🖨️ XeroxAI — Local-First Print Shop & Cyber-Café Suite
+Good thing you checked that! Your existing `README.md` still says **"Hacktoberfest Week 2 'Side Hustle' Challenge Entry"** at the top and is missing all the new **XeroxAI 2.0** engines (**SmartDoc AI**, **Deterministic Smart Billing**, **AI Order Assistant**, and **Order Management**).
 
-> **Hacktoberfest Week 2 "Side Hustle" Challenge Entry**  
-> Eliminating per-document token costs and privacy risks for independent print, stationery, and cyber-café operators using open-weight AI and on-premise execution.
+You can replace it right on GitHub.com (via the pencil icon on `README.md`, committing directly to `main`) or paste it into `README.md` before pushing. Here is the clean, updated **XeroxAI 2.0** `README.md` with all Hacktoberfest references removed and all 7 engines documented:
 
----
+```markdown
+# 🖨️ XeroxAI 2.0 — Intelligent Print Shop & Document Automation System
 
-## 💡 The Context & Side Hustle Challenge
-
-Independent print shops and cyber-cafés operate on razor-thin margins while handling sensitive customer documents daily: government exam applications (UPSC, TNPSC, SSC), passport photos, national identity cards, legal affidavits, and curriculum vitae.
-
-- **The Privacy Problem**: Cloud APIs (like OpenAI or closed vision APIs) expose confidential customer data to third-party data centers, creating regulatory and trust liabilities.
-- **The Margin Problem**: Commercial per-document API charges destroy profitability for ₹2-₹10 printing jobs.
-- **The Counter Workflow Bottleneck**: Counter operators juggle multiple manual tools: image editors to compress photos under government portal 50KB limits, word processors to format rough WhatsApp notes into biodata, and guesswork on turnaround times during peak rush hours.
-
-**XeroxAI** is an offline-capable, local-first counter cockpit that runs entirely on local models and tools. It delivers instant, zero-cost, private processing at high counter speed.
+**Eliminating per-document API costs, manual document cleanup, and billing errors for independent print, stationery, and digital service counters using local-first AI and computer vision.**
 
 ---
 
-## 🏆 Target Sponsor Alignment
+## 💡 The Problem & Solution
+Independent print shops and digital service centers operate on tight margins while handling sensitive customer documents daily: government exam applications (UPSC, TNPSC, SSC), passport photos, identity documents, receipts, and biodata forms.
 
-| Sponsor | Integration Role | Implementation Details |
-|---|---|---|
-| **Google Gemma** | Local Open-Weight Document Field Extraction | `gemma2:2b` served via local Ollama (`http://localhost:11434/api/generate`) with structured JSON extraction of unstructured customer notes into standardized biodata fields. Includes deterministic heuristic fallback. |
-| **Prior Labs (TabPFN-3.5)** | Foundation Tabular Queuing & Dynamic Pricing | `TabPFNRegressor` trained on cyber-café queue logs, predicting exact turnaround minutes from page counts, color modes, lamination requirements, and queue depth, with fair dynamic pricing calculations. |
-| **Sentry** | Full-Pipeline Agent Tracing & Observability | Custom distributed spans (`llm.extraction`, `ml.tabpfn_prediction`, `image.processing`) via `sentry-sdk` capturing latency, token/char lengths, model metadata, and error handling. |
-| **Render** | Multi-Service Production Hosting | Multi-service Infrastructure-as-Code blueprint (`render.yaml`) configuring unified deployment for the FastAPI Python backend and Next.js frontend. |
+- **Privacy & Compliance:** Sending customer IDs, photos, and personal forms to external cloud APIs creates privacy liabilities. XeroxAI 2.0 runs document enhancement, entity extraction, and queue prediction locally.
+- **Zero Per-Document Token Costs:** Cloud vision/LLM fees eat into ₹2–₹10 print jobs. Local execution keeps unit economics profitable.
+- **Counter Workflow Automation:** Replaces juggling separate photo editors, manual skew/shadow cleanup, word processors, and calculator spreadsheets with a single unified counter workspace.
 
 ---
 
 ## ⚡ Core Functional Engines
 
-### 1. Photo Spec Engine (`/api/resize-photo/`)
-- **TNPSC / UPSC Govt Exams**: Strict `200x230 px` JPEG. Dynamic stepped compression and compliant padding guaranteeing final file size is **strictly between 20 KB and 50 KB**.
-- **Standard Passport**: `35x45 mm` aspect ratio (`413x531 px` at 300 DPI equivalent) with automatic contrast enhancement for counter photo printing.
-- **Official Signature**: Strict `140x60 px`, strictly under **20 KB**.
+### 1. SmartDoc AI (`/api/smartdoc/enhance`)
+- **Universal Ingestion:** Accepts JPG, JPEG, PNG, WebP, and multi-page PDF documents.
+- **Automated Geometry & Clarity Repair:** Laplacian blur detection, automatic deskewing, 4-point perspective distortion correction, and illumination/shadow normalization.
+- **Zero-Hallucination Guarantee:** Uses deterministic pixel-level computer vision (OpenCV & Pillow)—never uses generative AI to rewrite or alter text, numbers, names, or personal details.
 
-### 2. Biodata & Form Extraction Engine (`/api/generate-biodata/`)
-- Accepts raw, scrawled customer notes or WhatsApp text pastes.
-- Prompts local `gemma2:2b` via Ollama for structured JSON entity extraction (`full_name`, `dob`, `qualification`, `contact`, `email`, `address`, `skills`, `languages`).
-- Generates a ready-to-print, single-page A4 PDF using **ReportLab** with 0.5-inch margins, modern sans-serif typography, and candidate declaration block.
+### 2. AI Order Assistant & Deterministic Smart Billing (`/api/orders/parse` & `/api/billing/calculate`)
+- **Natural-Language Intake:** Operators enter counter requests like *"50 colour copies, double-sided, and 2 laminated sheets for Rahul"* to auto-populate itemized print jobs (with a built-in deterministic regex fallback when Ollama is offline).
+- **100% Deterministic Rate Engine:** Computes totals strictly from shop-configured SQLite rates across B&W vs. Colour, Simplex vs. Duplex, A4/A3/Legal/Letter paper sizes, and lamination—AI never calculates or alters prices.
 
-### 3. Queue Turnaround & Dynamic Pricing Engine (`/api/estimate-job/`)
-- Powered by **Prior Labs TabPFN-3.5** tabular foundation model.
-- Features: `[page_count, is_color, needs_lamination, current_queue_customers]`.
-- Recommends fair counter pricing: base sheet rates (₹2 B&W / ₹10 Color) + lamination fee (₹20) + dynamic rush queue buffer.
+### 3. Order Management System (`/api/orders`)
+- **Persistent SQLite Queue:** Generates sequential daily order IDs (`XRX-YYYYMMDD-XXXX`) with customer details, itemized JSON, and lifecycle tracking (`Pending` → `Processing` → `Completed`).
+- **Live Counter Metrics:** Searchable and filterable order queue with real-time revenue and job status tallies.
 
-### 4. Sentry Agent Tracing & Observability
-- Integrated Sentry SDK performance monitoring with custom spans.
-- Live telemetry monitor exposing span duration and engine health to the counter dashboard.
+### 4. Govt Photo Spec Engine (`/api/resize-photo/`)
+- **TNPSC / UPSC Govt Exams:** Strict `200×230 px` JPEG with binary-search compression guaranteeing file size stays strictly between **20 KB and 50 KB**.
+- **Standard Passport & Official Signature:** `35×45 mm` (`413×531 px`) contrast-enhanced portrait preset and `140×60 px` (< 20 KB) signature preset.
+
+### 5. Biodata & Form Extraction Engine (`/api/generate-biodata/`)
+- Converts rough customer notes or WhatsApp text into structured JSON fields using local `gemma2:2b` via Ollama (with heuristic fallback) and renders a ready-to-print single-page A4 PDF via ReportLab.
+
+### 6. Queue Turnaround Estimator (`/api/estimate-job/`)
+- Predicts turnaround wait times from page count, color mode, lamination, and live queue depth using Prior Labs TabPFN-3.5.
+
+### 7. Pipeline Observability (`/api/telemetry`)
+- Integrated Sentry SDK distributed tracing capturing execution latency across document cleanup, ML inference, and LLM extraction spans.
 
 ---
 
 ## 🚀 Quickstart & Local Launch
 
 ### Prerequisites
-- Python 3.10+
-- Node.js 18+ & npm
-- [Ollama](https://ollama.ai) (optional, for live Gemma inference)
+- **Python 3.10+**
+- **Node.js 18+ & npm**
+- **Ollama** *(optional, for live `gemma2:2b` inference; deterministic fallbacks activate automatically if offline)*
 
-### 1. Pull the Gemma Model (Optional for Live Ollama)
-```bash
-ollama pull gemma2:2b
-ollama run gemma2:2b
-```
-*(If Ollama is not installed or offline, XeroxAI automatically activates its deterministic heuristic fallback without crashing).*
-
-### 2. Start the Backend API
+### 1. Start the FastAPI Backend
 ```bash
 cd backend
 python -m venv venv
@@ -76,67 +66,62 @@ python -m venv venv
 # source venv/bin/activate
 
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
-```
-API Documentation will be live at `http://localhost:8000/docs`.
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
-### 3. Run Automated Tests
+```
+
+Interactive API documentation is available at `http://127.0.0.1:8000/docs`.
+
+### 2. Run Automated Test Suite (35 Passing Tests)
+
 ```bash
 cd backend
 pytest -v
+
 ```
 
-### 4. Start the Next.js Dashboard
+### 3. Start the Next.js Counter Dashboard
+
 ```bash
 cd frontend
 npm install
 npm run dev
+
 ```
+
 Open `http://localhost:3000` in your browser.
 
 ---
 
 ## 🛠️ Architecture & Directory Layout
 
-```
+```text
 xeroxai/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py              # FastAPI app, CORS, routes & Sentry init
-│   │   ├── config.py            # App settings (Ollama URL, Sentry DSN, defaults)
-│   │   ├── models.py            # Pydantic schemas (Biodata, Photo, Queue)
-│   │   ├── photo_engine.py      # PIL resizing & binary-search 20-50KB compression
-│   │   ├── biodata_engine.py    # Gemma Ollama caller & ReportLab A4 PDF generator
-│   │   ├── estimator.py         # Prior Labs TabPFN regressor & pricing logic
+│   │   ├── config.py            # Environment & runtime settings
+│   │   ├── database.py          # SQLite persistence (orders & pricing_config)
+│   │   ├── models.py            # Pydantic request/response schemas
+│   │   ├── smartdoc_engine.py   # OpenCV/Pillow blur, deskew, warp & shadow cleanup
+│   │   ├── order_engine.py      # Deterministic billing & NL order parser
+│   │   ├── photo_engine.py      # Strict 20-50KB & dimension image resizer
+│   │   ├── biodata_engine.py    # Gemma Ollama extractor & ReportLab A4 PDF builder
+│   │   ├── estimator.py         # TabPFN queue turnaround predictor
 │   │   └── telemetry.py         # Sentry span helpers & live metrics buffer
-│   ├── tests/
-│   │   ├── test_api.py          # FastAPI endpoint integration tests
-│   │   ├── test_photo_engine.py # Strict 20-50KB and dimension checks
-│   │   ├── test_biodata_engine.py # Schema & PDF generation checks
-│   │   └── test_estimator.py    # TabPFN turnaround & pricing tests
-│   ├── pytest.ini
+│   ├── tests/                   # 35 unit & integration tests (pytest)
 │   └── requirements.txt
 ├── frontend/                    # Next.js App Router Counter Dashboard
 │   ├── src/
-│   │   ├── app/
-│   │   │   ├── layout.tsx       # Root layout
-│   │   │   ├── page.tsx         # High-contrast counter dashboard
-│   │   │   └── globals.css
-│   │   ├── components/          # Counter cards & live monitors
-│   │   └── lib/                 # API client & types
-│   ├── package.json
-│   └── tailwind.config.ts
-├── render.yaml                  # Multi-service Render deployment spec
+│   │   ├── app/                 # Daylight dashboard layout & pages
+│   │   ├── components/          # SmartDoc, Billing, Orders, Photo, Biodata & Queue UI
+│   │   └── lib/                 # Typed API client & interfaces
+│   └── package.json
 └── README.md
+
 ```
 
----
+```
 
-## 🌐 Deploy to Render
 
-This repository includes a multi-service `render.yaml` blueprint. To deploy:
-1. Push this repository to GitHub.
-2. In the Render Dashboard, click **New +** -> **Blueprint**.
-3. Select this repository; Render will automatically detect `render.yaml` and provision:
-   - `xeroxai-backend`: FastAPI Python Web Service
-   - `xeroxai-dashboard`: Next.js Static/Node Web Service
+```
