@@ -1,0 +1,43 @@
+services:
+  # --------------------------------------------------------------------------
+  # 1. FastAPI Backend API Service (Python Runtime)
+  # --------------------------------------------------------------------------
+  - type: web
+    name: xeroxai-backend
+    env: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    plan: standard
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: ENVIRONMENT
+        value: production
+      - key: SENTRY_DSN
+        sync: false
+      - key: OLLAMA_BASE_URL
+        value: http://localhost:11434
+      - key: GEMMA_MODEL
+        value: gemma2:2b
+      - key: TABPFN_TOKEN
+        sync: false
+
+  # --------------------------------------------------------------------------
+  # 2. Next.js Counter Dashboard Frontend (Node Runtime)
+  # --------------------------------------------------------------------------
+  - type: web
+    name: xeroxai-dashboard
+    env: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    plan: standard
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: xeroxai-backend
+          property: host
