@@ -1,55 +1,57 @@
 
-# 🖨️ XeroxAI 2.0 — Intelligent Print Shop & Document Automation System
+# XeroxAI 2.0 — Smart Print Shop & Document Automation System
 
-**Eliminating per-document API costs, manual document cleanup, and billing errors for independent print, stationery, and digital service counters using local-first AI and computer vision.**
-
----
-
-## 💡 The Problem & Solution
-Independent print shops and digital service centers operate on tight margins while handling sensitive customer documents daily: government exam applications (UPSC, TNPSC, SSC), passport photos, identity documents, receipts, and biodata forms.
-
-- **Privacy & Compliance:** Sending customer IDs, photos, and personal forms to external cloud APIs creates privacy liabilities. XeroxAI 2.0 runs document enhancement, entity extraction, and queue prediction locally.
-- **Zero Per-Document Token Costs:** Cloud vision/LLM fees eat into ₹2–₹10 print jobs. Local execution keeps unit economics profitable.
-- **Counter Workflow Automation:** Replaces juggling separate photo editors, manual skew/shadow cleanup, word processors, and calculator spreadsheets with a single unified counter workspace.
+XeroxAI 2.0 is a local-first counter workspace built for independent print shops, stationery stores, and digital service centers. It automates document cleanup, government exam photo resizing, natural-language order entry, and billing calculations without sending customer files to third-party cloud APIs.
 
 ---
 
-## ⚡ Core Functional Engines
+## Chosen Vertical
+**Open Innovation** (Print & Digital Service Counter Automation)
+
+---
+
+## Approach and Logic
+1. **Local-First Privacy:** Print shops handle sensitive customer records every day, including exam forms, ID cards, passport photos, and resumes. XeroxAI 2.0 processes documents, images, and order records directly on the host server rather than sending customer data to external commercial AI APIs.
+2. **Strict Accuracy Guardrails:**
+   - **No Altered Text:** SmartDoc AI uses computer vision (OpenCV and Pillow) instead of generative image models so names, numbers, dates, and signatures are never rewritten or distorted.
+   - **Deterministic Billing:** Natural-language order parsing extracts job requirements (copies, color mode, double-sided, paper size, lamination), while final prices are calculated strictly from shop-configured database rates. AI never calculates or guesses prices.
+3. **Offline and Cloud Resilience:** When a local Ollama (`gemma2:2b`) node is running on the shop computer, entity extraction uses local model inference. In hosted web deployments where local Ollama is unavailable, the backend automatically switches to a deterministic rule-based parser so every feature works reliably.
+
+---
+
+## How the Solution Works
 
 ### 1. SmartDoc AI (`/api/smartdoc/enhance`)
-- **Universal Ingestion:** Accepts JPG, JPEG, PNG, WebP, and multi-page PDF documents.
-- **Automated Geometry & Clarity Repair:** Laplacian blur detection, automatic deskewing, 4-point perspective distortion correction, and illumination/shadow normalization.
-- **Zero-Hallucination Guarantee:** Uses deterministic pixel-level computer vision (OpenCV & Pillow)—never uses generative AI to rewrite or alter text, numbers, names, or personal details.
+- Supports JPG, JPEG, PNG, WebP, and multi-page PDF uploads.
+- Checks image sharpness, detects page tilt, straightens skewed borders, removes shadows, and enhances contrast while keeping the original file intact.
 
-### 2. AI Order Assistant & Deterministic Smart Billing (`/api/orders/parse` & `/api/billing/calculate`)
-- **Natural-Language Intake:** Operators enter counter requests like *"50 colour copies, double-sided, and 2 laminated sheets for Rahul"* to auto-populate itemized print jobs (with a built-in deterministic regex fallback when Ollama is offline).
-- **100% Deterministic Rate Engine:** Computes totals strictly from shop-configured SQLite rates across B&W vs. Colour, Simplex vs. Duplex, A4/A3/Legal/Letter paper sizes, and lamination—AI never calculates or alters prices.
+### 2. AI Order Assistant and Smart Billing (`/api/orders/parse` & `/api/billing/calculate`)
+- Lets operators type or paste plain-English requests (for example: *"50 colour copies, double-sided, and 2 laminated sheets for Rahul"*) to auto-fill itemized print jobs.
+- Calculates exact totals in Indian Rupees (INR) across Black & White vs. Colour, Single-sided vs. Double-sided, A4 / A3 / Legal / Letter paper sizes, and lamination using customizable shop rates stored in SQLite.
 
-### 3. Order Management System (`/api/orders`)
-- **Persistent SQLite Queue:** Generates sequential daily order IDs (`XRX-YYYYMMDD-XXXX`) with customer details, itemized JSON, and lifecycle tracking (`Pending` → `Processing` → `Completed`).
-- **Live Counter Metrics:** Searchable and filterable order queue with real-time revenue and job status tallies.
+### 3. Order Management (`/api/orders`)
+- Generates sequential daily order IDs (`XRX-YYYYMMDD-XXXX`) with customer details, itemized breakdowns, and live status tracking (`Pending`, `Processing`, `Completed`) with search and filtering.
 
 ### 4. Govt Photo Spec Engine (`/api/resize-photo/`)
-- **TNPSC / UPSC Govt Exams:** Strict `200×230 px` JPEG with binary-search compression guaranteeing file size stays strictly between **20 KB and 50 KB**.
-- **Standard Passport & Official Signature:** `35×45 mm` (`413×531 px`) contrast-enhanced portrait preset and `140×60 px` (< 20 KB) signature preset.
+- **TNPSC / UPSC Preset:** Resizes images to `200x230 px` JPEG and compresses them strictly between **20 KB and 50 KB**.
+- **Passport and Signature Presets:** Formats `35x45 mm` (`413x531 px`) portraits and `140x60 px` (< 20 KB) signatures.
 
-### 5. Biodata & Form Extraction Engine (`/api/generate-biodata/`)
-- Converts rough customer notes or WhatsApp text into structured JSON fields using local `gemma2:2b` via Ollama (with heuristic fallback) and renders a ready-to-print single-page A4 PDF via ReportLab.
+### 5. A4 Biodata Maker (`/api/generate-biodata/`)
+- Extracts structured candidate details from rough customer notes or WhatsApp text and generates a ready-to-print single-page A4 PDF.
 
 ### 6. Queue Turnaround Estimator (`/api/estimate-job/`)
-- Predicts turnaround wait times from page count, color mode, lamination, and live queue depth using Prior Labs TabPFN-3.5.
-
-### 7. Pipeline Observability (`/api/telemetry`)
-- Integrated Sentry SDK distributed tracing capturing execution latency across document cleanup, ML inference, and LLM extraction spans.
+- Estimates customer wait times based on page count, color mode, lamination, and current counter queue depth.
 
 ---
 
-## 🚀 Quickstart & Local Launch
+## Assumptions Made
+- **Currency and Rates:** All default printing and lamination prices are set in Indian Rupees (INR) and can be updated anytime by the shop operator.
+- **Local vs. Cloud Execution:** In a local shop setup, Ollama (`gemma2:2b`) runs on `localhost:11434`. In hosted web demos without a local Ollama instance, deterministic parsing handles order and biodata extraction automatically.
+- **Demo Database Persistence:** On free stateless cloud hosting, SQLite resets when the container restarts, whereas on a shop PC it persists permanently across reboots.
 
-### Prerequisites
-- **Python 3.10+**
-- **Node.js 18+ & npm**
-- **Ollama** *(optional, for live `gemma2:2b` inference; deterministic fallbacks activate automatically if offline)*
+---
+
+## Local Setup and Verification
 
 ### 1. Start the FastAPI Backend
 ```bash
@@ -66,9 +68,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 ```
 
-Interactive API documentation is available at `http://127.0.0.1:8000/docs`.
-
-### 2. Run Automated Test Suite (35 Passing Tests)
+### 2. Run Automated Tests (35 Passing Tests)
 
 ```bash
 cd backend
@@ -76,7 +76,7 @@ pytest -v
 
 ```
 
-### 3. Start the Next.js Counter Dashboard
+### 3. Start the Next.js Frontend
 
 ```bash
 cd frontend
@@ -87,8 +87,9 @@ npm run dev
 
 Open `http://localhost:3000` in your browser.
 
----
+```
 
+```
 ## 🛠️ Architecture & Directory Layout
 
 ```text
